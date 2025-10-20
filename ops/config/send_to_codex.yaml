@@ -1,0 +1,9 @@
+﻿version: g2
+mode: cli
+default_repo: .
+retry: 1
+transport:
+  cli_command: codex
+logging:
+  level: info
+  save: true
