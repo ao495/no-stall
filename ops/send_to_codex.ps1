@@ -459,7 +459,7 @@ function Invoke-Main {
     $verboseMode = $VerbosePreference -eq 'Continue'
 
     try {
-        Invoke-SendToCodex -Message $Message -RepoPath $repoPath -Branch $Branch -DryRun $DryRun -RunId $script:RunId -Config $config -LogFile $logFile -VerboseMode:$verboseMode
+        Invoke-SendToCodex -Message $Message -RepoPath $repoPath -Branch $Branch -DryRun:$DryRun -RunId $script:RunId -Config $config -LogFile $logFile -VerboseMode:$verboseMode
     }
     catch {
         Write-ErrorLog -Message ("Unhandled error: {0}" -f $_.Exception.Message)
@@ -468,8 +468,3 @@ function Invoke-Main {
 }
 
 Invoke-Main
-
-
-
-
-
