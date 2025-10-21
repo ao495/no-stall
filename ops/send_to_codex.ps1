@@ -1,4 +1,4 @@
-﻿# VERSION: G2
+# VERSION: G2
 # NEXT: implement Codex-driven PR pipeline
 #requires -Version 7.0
 <#!
@@ -18,15 +18,15 @@ param(
     [string]$Message,
 
     [Parameter()]
-    [Alias("repo")]
+    [Alias("Repository", "RepoName")]
     [string]$Repo,
 
     [Parameter()]
-    [Alias("branch")]
+    [Alias("TargetBranch", "BranchName")]
     [string]$Branch,
 
     [Parameter()]
-    [Alias("dry-run")]
+    [Alias("Dry", "DryRunMode")]
     [switch]$DryRun
 )
 
@@ -468,3 +468,8 @@ function Invoke-Main {
 }
 
 Invoke-Main
+
+
+
+
+
