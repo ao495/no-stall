@@ -317,6 +317,33 @@ function Send-CodexMessage {
 
     Write-Log -Message ("Prepared Codex payload ({0} characters)." -f $payload.Length)
 
+    $commandAvailable = $true
+    try {
+        $null = Get-Command -Name $transportCommand -ErrorAction Stop
+    }
+    catch {
+        $commandAvailable = $false
+        Write-Warn -Message ("Transport command '{0}' not found. Using mock Codex response." -f $transportCommand)
+    }
+
+    if (-not $commandAvailable) {
+        $mockResponse = "[Mock Codex] {0} | Payload length: {1}" -f (Get-Date -Format "O"), $payload.Length
+        Write-Log -Message "Generated mock Codex response due to missing transport command."
+        Write-Host $mockResponse
+
+        if ($LogFile) {
+            try {
+                Add-Content -Path $LogFile -Value ("[send_to_codex] INFO Codex response ({0})" -f (Get-Date -Format "O"))
+                Add-Content -Path $LogFile -Value $mockResponse
+            }
+            catch {
+                Write-Warn -Message ("Failed to append mock response to log file: {0}" -f $_.Exception.Message)
+            }
+        }
+
+        return $mockResponse
+    }
+
     try {
         $processInfo = New-Object System.Diagnostics.ProcessStartInfo
         $processInfo.FileName = $transportCommand
@@ -339,8 +366,21 @@ function Send-CodexMessage {
         $process.WaitForExit()
     }
     catch {
-        Write-ErrorLog -Message ("Failed to execute Codex transport: {0}" -f $_.Exception.Message)
-        return
+        Write-Warn -Message ("Failed to execute Codex transport: {0}. Falling back to mock response." -f $_.Exception.Message)
+        $mockResponse = "[Mock Codex] {0} | Transport execution failed." -f (Get-Date -Format "O")
+        Write-Host $mockResponse
+
+        if ($LogFile) {
+            try {
+                Add-Content -Path $LogFile -Value ("[send_to_codex] INFO Codex response ({0})" -f (Get-Date -Format "O"))
+                Add-Content -Path $LogFile -Value $mockResponse
+            }
+            catch {
+                Write-Warn -Message ("Failed to append mock response to log file: {0}" -f $_.Exception.Message)
+            }
+        }
+
+        return $mockResponse
     }
 
     if ($errorOutput) {
