@@ -1,0 +1,47 @@
+{
+  "version": "1.0",
+  "language": "en",
+  "description": "Core rule set for English-based compression in Flux System. Focus on clarity, minimalism, and semantic retention.",
+  "rules": {
+    "remove_articles": {
+      "pattern": "\\b(a|an|the)\\b",
+      "replacement": "",
+      "comment": "Articles rarely affect meaning; remove them."
+    },
+    "simplify_auxiliary_verbs": {
+      "pattern": "\\b(can|could|would|should|may|might|must|will|shall)\\b",
+      "replacement": "",
+      "comment": "Auxiliary verbs often redundant in summaries."
+    },
+    "remove_redundant_phrases": {
+      "pattern": "\\b(in order to|as well as|in the case of|due to the fact that)\\b",
+      "replacement": "",
+      "comment": "Replace long forms with simpler equivalents or omit."
+    },
+    "normalize_whitespace": {
+      "pattern": "\\s+",
+      "replacement": " ",
+      "comment": "Ensure single spaces."
+    },
+    "trim_punctuation": {
+      "pattern": "[,;:]+",
+      "replacement": "",
+      "comment": "Reduce punctuation clutter."
+    },
+    "replace_contractions": {
+      "pattern": "(\\b)(don't|can't|won't|isn't|aren't|wasn't|weren't|didn't|hasn't|haven't|hadn't)(\\b)",
+      "replacement": "\\1not\\3",
+      "comment": "Expand contractions for clarity."
+    },
+    "lowercase": {
+      "pattern": ".*",
+      "replacement": "{lowercase}",
+      "comment": "Convert all text to lowercase for consistency."
+    }
+  },
+  "postprocess": {
+    "trim": true,
+    "strip_quotes": true,
+    "collapse_newlines": true
+  }
+}
