@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "language": "ja",
+  "description": "Core rule set for Japanese-based compression in Flux System. Emphasizes readability, brevity, and meaning retention.",
+  "rules": {
+    "remove_politeness": {
+      "pattern": "(です|ます|でした|ました|でしょう|ください|下さい|お願いいたします|お願い致します)",
+      "replacement": "",
+      "comment": "Polite endings are often redundant in informational contexts."
+    },
+    "remove_particles": {
+      "pattern": "(は|が|を|に|で|と|へ|も|から|まで|より|など|の)",
+      "replacement": "",
+      "comment": "Particles can often be omitted without major loss of meaning."
+    },
+    "simplify_connectors": {
+      "pattern": "(そして|しかし|ですが|けれど|また|なので|だから|それで|それに)",
+      "replacement": " ",
+      "comment": "Simplify or omit connectors to shorten sentences."
+    },
+    "remove_redundant_phrases": {
+      "pattern": "(ということ|といったような|において|に関して|について|的な|などの|などを)",
+      "replacement": "",
+      "comment": "Eliminate verbose expressions."
+    },
+    "normalize_whitespace": {
+      "pattern": "\\s+",
+      "replacement": " ",
+      "comment": "Ensure single spaces between tokens."
+    },
+    "trim_punctuation": {
+      "pattern": "[、。]+",
+      "replacement": "",
+      "comment": "Reduce punctuation for compactness."
+    },
+    "lowercase_katakana": {
+      "pattern": ".*",
+      "replacement": "{normalize_katakana}",
+      "comment": "Normalize katakana forms (optional)."
+    }
+  },
+  "postprocess": {
+    "trim": true,
+    "collapse_newlines": true
+  }
+}
