@@ -1,0 +1,32 @@
+name: PowerShell smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "ops/**"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Path ops -Filter *.ps1 -Recurse | ForEach-Object {
+            $errors = $null
+            [System.Management.Automation.PSParser]::Tokenize((Get-Content -Path $_.FullName -Raw), [ref]$errors) | Out-Null
+            if ($errors) {
+              $failed = $true
+              Write-Error "Parse errors in $($_.FullName): $($errors | Out-String)"
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Run send_to_codex dry-run
+        shell: pwsh
+        run: pwsh ./ops/send_to_codex.ps1 "ci smoke" -DryRun
