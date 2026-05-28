@@ -1,4 +1,4 @@
-﻿# VERSION: G2
+# VERSION: G2
 # NEXT: implement Codex-driven PR pipeline
 #requires -Version 7.0
 <#!
@@ -18,15 +18,15 @@ param(
     [string]$Message,
 
     [Parameter()]
-    [Alias("repo")]
+    [Alias("Repository", "RepoName")]
     [string]$Repo,
 
     [Parameter()]
-    [Alias("branch")]
+    [Alias("TargetBranch", "BranchName")]
     [string]$Branch,
 
     [Parameter()]
-    [Alias("dry-run")]
+    [Alias("Dry", "DryRunMode")]
     [switch]$DryRun
 )
 
@@ -124,6 +124,82 @@ function New-RunId {
     return "run-{0}" -f (Get-Date -Format "yyyyMMdd-HHmmss")
 }
 
+function ConvertFrom-SimpleYaml {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Yaml
+    )
+
+    $root = [ordered]@{}
+    $currentSection = $root
+
+    foreach ($line in ($Yaml -split "`r?`n")) {
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith("#")) {
+            continue
+        }
+
+        if ($line -match "^\s{2}([^:]+):\s*(.*)$") {
+            $key = $Matches[1].Trim()
+            $value = $Matches[2].Trim()
+            $currentSection[$key] = Convert-SimpleYamlValue -Value $value
+            continue
+        }
+
+        if ($line -match "^([^:]+):\s*(.*)$") {
+            $key = $Matches[1].Trim()
+            $value = $Matches[2].Trim()
+            if ($value -eq "") {
+                $root[$key] = [ordered]@{}
+                $currentSection = $root[$key]
+            }
+            else {
+                $root[$key] = Convert-SimpleYamlValue -Value $value
+                $currentSection = $root
+            }
+        }
+    }
+
+    return ConvertTo-NestedObject -Value $root
+}
+
+function Convert-SimpleYamlValue {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()]
+        [string]$Value
+    )
+
+    if ($Value -match "^(true|false)$") {
+        return [bool]::Parse($Value)
+    }
+
+    $intValue = 0
+    if ([int]::TryParse($Value, [ref]$intValue)) {
+        return $intValue
+    }
+
+    return $Value.Trim("'`"")
+}
+
+function ConvertTo-NestedObject {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $Value
+    )
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $object = [pscustomobject]@{}
+        foreach ($key in $Value.Keys) {
+            Add-Member -InputObject $object -MemberType NoteProperty -Name $key -Value (ConvertTo-NestedObject -Value $Value[$key])
+        }
+        return $object
+    }
+
+    return $Value
+}
+
 function Load-Config {
     [CmdletBinding()]
     param(
@@ -135,15 +211,16 @@ function Load-Config {
     $configPath = Join-Path -Path $configDirectory -ChildPath "send_to_codex.yaml"
 
     $defaultConfigLines = @(
-        'version: g2',
-        'mode: cli',
-        'default_repo: .',
-        'retry: 1',
-        'transport:',
-        '  cli_command: codex',
-        'logging:',
-        '  level: info',
-        '  save: true'
+        "version: g2",
+        "mode: cli",
+        "default_repo: .",
+        "retry: 1",
+        "transport:",
+        "  cli_command: codex",
+        "  timeout_seconds: 300",
+        "logging:",
+        "  level: info",
+        "  save: true"
     )
     $defaultConfig = $defaultConfigLines -join "`n"
 
@@ -165,9 +242,21 @@ function Load-Config {
         }
     }
 
-    try {
+    $rawConfig = $defaultConfig
+    if (Test-Path -Path $configPath) {
         $rawConfig = Get-Content -Path $configPath -Raw
-        $configData = ConvertFrom-Yaml -Yaml $rawConfig
+    }
+
+    try {
+        $yamlCommand = Get-Command -Name ConvertFrom-Yaml -ErrorAction SilentlyContinue
+        if ($yamlCommand) {
+            $configData = ConvertFrom-Yaml -Yaml $rawConfig
+        }
+        else {
+            Write-Host "[send_to_codex] WARN ConvertFrom-Yaml is unavailable. Using built-in simple YAML parser."
+            $configData = ConvertFrom-SimpleYaml -Yaml $rawConfig
+        }
+
         return [pscustomobject]@{
             Path = $configPath
             Data = $configData
@@ -175,7 +264,7 @@ function Load-Config {
     }
     catch {
         Write-Host "[send_to_codex] WARN Unable to load configuration. Falling back to defaults. $($_.Exception.Message)"
-        $configData = ConvertFrom-Yaml -Yaml $defaultConfig
+        $configData = ConvertFrom-SimpleYaml -Yaml $defaultConfig
         return [pscustomobject]@{
             Path = $configPath
             Data = $configData
@@ -274,7 +363,6 @@ function Send-CodexMessage {
 
         [psobject]$Config,
 
-        [Parameter(Mandatory = $true)]
         [string]$LogFile,
 
         [Parameter()]
@@ -292,13 +380,17 @@ function Send-CodexMessage {
     }
 
     if ($transportMode -ne "cli") {
-        Write-Warn -Message ("Configured transport mode '{0}' is not supported in this release." -f $transportMode)
-        return
+        throw "Configured transport mode '$transportMode' is not supported in this release."
     }
 
     $transportCommand = "codex"
     if ($Config -and $Config.PSObject.Properties["transport"] -and $Config.transport.cli_command) {
         $transportCommand = $Config.transport.cli_command
+    }
+
+    $timeoutSeconds = 300
+    if ($Config -and $Config.PSObject.Properties["transport"] -and $Config.transport.PSObject.Properties["timeout_seconds"]) {
+        $timeoutSeconds = [int]$Config.transport.timeout_seconds
     }
 
     $branchDisplay = if ([string]::IsNullOrWhiteSpace($Branch)) { "(not specified)" } else { $Branch }
@@ -317,39 +409,61 @@ function Send-CodexMessage {
 
     Write-Log -Message ("Prepared Codex payload ({0} characters)." -f $payload.Length)
 
+    $command = Get-Command -Name $transportCommand -ErrorAction SilentlyContinue
+    if (-not $command) {
+        throw "Transport command '$transportCommand' was not found."
+    }
+
+    $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $processInfo.FileName = $transportCommand
+    $processInfo.UseShellExecute = $false
+    $processInfo.RedirectStandardInput = $true
+    $processInfo.RedirectStandardOutput = $true
+    $processInfo.RedirectStandardError = $true
+    $processInfo.CreateNoWindow = $true
+
+    if ($VerboseMode) {
+        Write-Log -Message ("Executing transport command: {0}" -f $transportCommand)
+    }
+
+    $process = [System.Diagnostics.Process]::Start($processInfo)
+    $exitCode = $null
     try {
-        $processInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $processInfo.FileName = $transportCommand
-        $processInfo.UseShellExecute = $false
-        $processInfo.RedirectStandardInput = $true
-        $processInfo.RedirectStandardOutput = $true
-        $processInfo.RedirectStandardError = $true
-        $processInfo.CreateNoWindow = $true
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
 
-        if ($VerboseMode) {
-            Write-Log -Message ("Executing transport command: {0}" -f $transportCommand)
-        }
-
-        $process = [System.Diagnostics.Process]::Start($processInfo)
         $process.StandardInput.Write($payload)
         $process.StandardInput.Close()
 
-        $response = $process.StandardOutput.ReadToEnd()
-        $errorOutput = $process.StandardError.ReadToEnd()
-        $process.WaitForExit()
+        $timeoutMs = [Math]::Max(1, $timeoutSeconds) * 1000
+        if (-not $process.WaitForExit($timeoutMs)) {
+            try {
+                $process.Kill($true)
+            }
+            catch {
+                Write-Warn -Message ("Failed to kill timed out transport process: {0}" -f $_.Exception.Message)
+            }
+            throw "Codex transport timed out after $timeoutSeconds seconds."
+        }
+
+        $response = $stdoutTask.GetAwaiter().GetResult()
+        $errorOutput = $stderrTask.GetAwaiter().GetResult()
+        $exitCode = $process.ExitCode
     }
-    catch {
-        Write-ErrorLog -Message ("Failed to execute Codex transport: {0}" -f $_.Exception.Message)
-        return
+    finally {
+        $process.Dispose()
     }
 
     if ($errorOutput) {
         Write-Warn -Message ("Codex transport stderr: {0}" -f $errorOutput.Trim())
     }
 
-    if (-not $response -or [string]::IsNullOrWhiteSpace($response)) {
-        Write-Warn -Message "Codex transport returned no response."
-        return
+    if ($exitCode -ne 0) {
+        throw "Codex transport failed with exit code $exitCode."
+    }
+
+    if ([string]::IsNullOrWhiteSpace($response)) {
+        throw "Codex transport returned no response."
     }
 
     Write-Log -Message "Codex transport completed; capturing response."
@@ -386,7 +500,6 @@ function Invoke-SendToCodex {
 
         [psobject]$Config,
 
-        [Parameter(Mandatory = $true)]
         [string]$LogFile,
 
         [Parameter()]
@@ -401,8 +514,8 @@ function Invoke-SendToCodex {
     }
 
     if ($DryRun.IsPresent) {
-        Write-Warn -Message "Dry-run mode active. Operational actions are skipped."
-        Write-Log -Message "Codex transport not invoked due to dry-run configuration."
+        Write-Warn -Message "Dry-run mode active. Codex transport is skipped."
+        Write-Log -Message ("Message payload: {0}" -f $Message)
         return
     }
 
@@ -456,10 +569,10 @@ function Invoke-Main {
     Write-Log -Message ("Run identifier: {0}" -f $script:RunId)
 
     $repoPath = Resolve-Repo -RepositoryRoot $repositoryRoot -RepoParameter $Repo -Config $config
-    $verboseMode = $VerbosePreference -eq 'Continue'
+    $verboseMode = $VerbosePreference -eq "Continue"
 
     try {
-        Invoke-SendToCodex -Message $Message -RepoPath $repoPath -Branch $Branch -DryRun $DryRun -RunId $script:RunId -Config $config -LogFile $logFile -VerboseMode:$verboseMode
+        Invoke-SendToCodex -Message $Message -RepoPath $repoPath -Branch $Branch -DryRun:$DryRun -RunId $script:RunId -Config $config -LogFile $logFile -VerboseMode:$verboseMode
     }
     catch {
         Write-ErrorLog -Message ("Unhandled error: {0}" -f $_.Exception.Message)

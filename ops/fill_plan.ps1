@@ -10,8 +10,20 @@
 param(
     [string]$PlanPath = "PLAN.md",
     [string]$LogDir = "logs/send",
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$SendDryRun
 )
+
+$RepositoryRoot = (Resolve-Path -Path (Join-Path -Path $PSScriptRoot -ChildPath "..")).Path
+
+function Resolve-RepoPath {
+    param([string]$Path)
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return $Path
+    }
+
+    return Join-Path -Path $RepositoryRoot -ChildPath $Path
+}
 
 function Write-Log {
     param([string]$Message)
@@ -21,13 +33,15 @@ function Write-Log {
 
 function Get-LatestLog {
     param([string]$Dir)
-    if (!(Test-Path $Dir)) { return $null }
-    Get-ChildItem $Dir -Filter *.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    $resolvedDir = Resolve-RepoPath -Path $Dir
+    if (!(Test-Path $resolvedDir)) { return $null }
+    Get-ChildItem $resolvedDir -Filter *.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 }
 
 function Analyze-NextStep {
     param([string]$PlanFile, [System.IO.FileInfo]$LatestLog)
-    $plan = if (Test-Path $PlanFile) { Get-Content $PlanFile -Raw } else { "" }
+    $resolvedPlanFile = Resolve-RepoPath -Path $PlanFile
+    $plan = if (Test-Path $resolvedPlanFile) { Get-Content $resolvedPlanFile -Raw } else { "" }
     $log = if ($LatestLog) { Get-Content $LatestLog.FullName -Raw } else { "" }
 
     Write-Log "PLANと最新ログを解析中..."
@@ -51,5 +65,11 @@ if ($DryRun) {
     Write-Host $cmd
 } else {
     Write-Log "send_to_codex.ps1 に転送します..."
-    pwsh ./ops/send_to_codex.ps1 -Message $cmd -DryRun
+    $sendScript = Join-Path -Path $PSScriptRoot -ChildPath "send_to_codex.ps1"
+    $sendArgs = @($sendScript, $cmd, "-Repo", $RepositoryRoot)
+    if ($SendDryRun) {
+        $sendArgs += "-DryRun"
+    }
+
+    & pwsh @sendArgs
 }
